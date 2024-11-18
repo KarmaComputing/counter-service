@@ -85,42 +85,107 @@
             margin-top: 20px;
             text-align: right;
         }
+        .sound-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.3s;
+        }
+        
+        .sound-toggle:hover {
+            background-color: #45a049;
+        }
+        
+        .sound-toggle.muted {
+            background-color: #f44336;
+        }
+        
+        .sound-toggle.muted:hover {
+            background-color: #da190b;
+        }
     </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Counter Service Dashboard</h1>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <h3>Total Counters</h3>
-                <p id="total-counters">0</p>
-            </div>
-            <div class="stat-card">
-                <h3>Total Increments</h3>
-                <p id="total-increments">0</p>
-            </div>
-            <div class="stat-card">
-                <h3>Updates/Second</h3>
-                <p id="updates-per-second">0</p>
-            </div>
-        </div>
-
-        <table id="counters-table">
-            <thead>
-                <tr>
-                    <th data-sort="counter">Counter ID</th>
-                    <th data-sort="value">Value</th>
-                    <th data-sort="percent">% of Total</th>
-                </tr>
-            </thead>
-            <tbody></tbody>
-        </table>
-        
-        <div class="timestamp">Last updated: <span id="last-update">Never</span></div>
-    </div>
-
     <script>
+        // Create audio context and sound effect
+        let audioContext = null;
+        let soundBuffer = null;
+        let previousTotalIncrements = 0;  
+        let soundEnabled = false;
+
+        async function initAudio() {
+            try {
+                if (!audioContext) {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    
+                    // Create a short, pleasant "pop" sound
+                    const duration = 0.1;
+                    const sampleRate = audioContext.sampleRate;
+                    soundBuffer = audioContext.createBuffer(1, duration * sampleRate, sampleRate);
+                    const data = soundBuffer.getChannelData(0);
+                    
+                    for (let i = 0; i < data.length; i++) {
+                        const t = i / sampleRate;
+                        // Create a simple sine wave with exponential decay
+                        data[i] = Math.sin(2 * Math.PI * 800 * t) * Math.exp(-15 * t);
+                    }
+                }
+                
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+                
+                soundEnabled = true;
+                updateSoundButton();
+            } catch (e) {
+                console.log('Audio initialization failed:', e);
+                soundEnabled = false;
+                updateSoundButton();
+            }
+        }
+
+        function toggleSound() {
+            if (!soundEnabled) {
+                initAudio();
+            } else {
+                soundEnabled = false;
+                if (audioContext) {
+                    audioContext.suspend();
+                }
+                updateSoundButton();
+            }
+        }
+
+        function updateSoundButton() {
+            const button = document.getElementById('sound-toggle');
+            button.textContent = soundEnabled ? '🔔 Sound On' : '🔕 Sound Off';
+            button.classList.toggle('muted', !soundEnabled);
+        }
+
+        function playUpdateSound() {
+            if (!soundEnabled || !audioContext || !soundBuffer) return;
+            
+            try {
+                const source = audioContext.createBufferSource();
+                source.buffer = soundBuffer;
+                
+                // Add a gain node to control volume
+                const gainNode = audioContext.createGain();
+                gainNode.gain.value = 0.2; // Reduce volume to 20%
+                
+                source.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                source.start();
+            } catch (e) {
+                console.log('Error playing sound:', e);
+            }
+        }
+
         let currentSort = {
             column: 'value',
             direction: 'desc'
@@ -154,6 +219,12 @@
         function updateTable(data) {
             const tbody = document.querySelector('#counters-table tbody');
             const totalIncrements = data.total_increments || 0;
+            
+            // Check if total increments increased
+            if (totalIncrements > previousTotalIncrements) {
+                playUpdateSound();
+            }
+            previousTotalIncrements = totalIncrements;
             
             // Create array of counter data for sorting
             const counterArray = Object.entries(data.counters).map(([counter, value]) => ({
@@ -234,5 +305,40 @@
             eventSource.close();
         };
     </script>
+</head>
+<body>
+    <div class="container">
+        <h1>Counter Service Dashboard</h1>
+        
+        <button id="sound-toggle" class="sound-toggle muted" onclick="toggleSound()">🔕 Sound Off</button>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Total Counters</h3>
+                <p id="total-counters">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Total Increments</h3>
+                <p id="total-increments">0</p>
+            </div>
+            <div class="stat-card">
+                <h3>Updates/Second</h3>
+                <p id="updates-per-second">0</p>
+            </div>
+        </div>
+
+        <table id="counters-table">
+            <thead>
+                <tr>
+                    <th data-sort="counter">Counter ID</th>
+                    <th data-sort="value">Value</th>
+                    <th data-sort="percent">% of Total</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+        
+        <div class="timestamp">Last updated: <span id="last-update">Never</span></div>
+    </div>
 </body>
 </html>
